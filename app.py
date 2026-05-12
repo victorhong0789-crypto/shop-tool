@@ -6,22 +6,32 @@ from openpyxl.utils import get_column_letter
 import io
 import streamlit as st
 
-# 设置密码
+# 初始化登录状态
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
 def check_password():
-    # 从 Streamlit 的 Secrets 里读取密码，或者直接写死（不推荐）
-    password = st.secrets.get("password", "你的强密码")
-    st.text_input("请输入访问密码", type="password", key="pwd_input")
+    st.title("请输入访问密码")
+    password = st.text_input("密码", type="password")
     if st.button("登录"):
-        if st.session_state["pwd_input"] == password:
+        # 从 Secrets 里读取密码
+        correct_password = st.secrets.get("password", "")
+        if password == correct_password:
             st.session_state["authenticated"] = True
-            st.experimental_rerun()
+            st.rerun()  # 这是新版本的刷新方法
         else:
             st.error("密码错误，请重试")
-    return st.session_state.get("authenticated", False)
+    return st.session_state["authenticated"]
 
-# 校验不通过就直接停止运行
+# 校验不通过，就只显示登录界面
 if not check_password():
     st.stop()
+
+# --- 下面是你原来的业务代码 ---
+# 把你原来 app.py 里的所有代码，都写在这里
+# 比如：
+# st.title("店铺数据诊断工具")
+# ...
 
 # -------------------------- 页面基础配置 --------------------------
 st.set_page_config(
