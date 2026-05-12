@@ -4,6 +4,24 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import io
+import streamlit as st
+
+# 设置密码
+def check_password():
+    # 从 Streamlit 的 Secrets 里读取密码，或者直接写死（不推荐）
+    password = st.secrets.get("password", "你的强密码")
+    st.text_input("请输入访问密码", type="password", key="pwd_input")
+    if st.button("登录"):
+        if st.session_state["pwd_input"] == password:
+            st.session_state["authenticated"] = True
+            st.experimental_rerun()
+        else:
+            st.error("密码错误，请重试")
+    return st.session_state.get("authenticated", False)
+
+# 校验不通过就直接停止运行
+if not check_password():
+    st.stop()
 
 # -------------------------- 页面基础配置 --------------------------
 st.set_page_config(
