@@ -5,10 +5,67 @@ from io import BytesIO
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # ======================
+# 苹果风全局样式（只加这段）
+# ======================
+st.markdown("""
+<style>
+    /* 全局背景 */
+    .stApp {
+        background-color: #f9fafb;
+        font-family: -apple-system, BlinkMacSystemFont, 'San Francisco', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }
+    /* 标题 */
+    h1, h2, h3, h4, h5, h6 {
+        color: #111827;
+        font-weight: 600;
+    }
+    /* 卡片容器 */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    .st-card, div[data-testid="stMetric"], div[data-testid="stFileUploader"] {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border: 1px solid #e5e7eb;
+    }
+    /* 按钮：苹果圆角浅蓝 */
+    .stButton>button {
+        background-color: #007aff;
+        color: white;
+        border-radius: 10px;
+        border: none;
+        padding: 0.5rem 1rem;
+        font-weight: 500;
+    }
+    .stButton>button:hover {
+        background-color: #0066cc;
+    }
+    /* 滑块 */
+    .stSlider {
+        padding: 0.5rem 0;
+    }
+    /* 表格 */
+    .stDataFrame {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid #e5e7eb;
+    }
+    /* 提示信息 */
+    .stInfo, .stSuccess, .stWarning, .stError {
+        border-radius: 10px;
+        border: none;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ======================
 # 页面配置
 # ======================
 st.set_page_config(page_title="毛利分析&自动提价工具", page_icon="📊", layout="wide")
-st.title("📊毛利监控")
+st.title("📊 毛利监控")
 
 # ======================
 # 1. 毛利阈值 百分比显示
@@ -29,14 +86,20 @@ uploaded_file = st.file_uploader("上传主Excel文件", type=["xlsx"], key="mai
 # ======================
 # 3. 上传入口2：需要排除的店铺列表
 # ======================
-st.subheader("📂上传【需要排除的店铺列表】")
+st.subheader("📂 上传【需要排除的店铺列表】")
 exclude_shop_file = st.file_uploader("上传只含【店铺】一列的Excel", type=["xlsx"], key="exclude_shop")
 
 # ======================
 # 4. 上传入口3：需要排除的SKU列表
 # ======================
-st.subheader("📂上传【需要排除的SKU列表】")
+st.subheader("📂 上传【需要排除的SKU列表】")
 exclude_sku_file = st.file_uploader("上传只含【系统SKU】一列的Excel", type=["xlsx"], key="exclude_sku")
+
+# ======================
+# 5. 上传入口4：控价SKU列表
+# ======================
+st.subheader("📂 上传【控价SKU列表】")
+price_control_sku_file = st.file_uploader("上传含【系统SKU】和【控价价格】两列的Excel", type=["xlsx"], key="price_control_sku")
 
 # ======================
 # 处理逻辑
@@ -72,12 +135,30 @@ if uploaded_file is not None:
     df["建议调价幅度"] = (df["目标价"] - df["商品售价"]) / df["商品售价"]
 
     # ======================
+    # 加载控价SKU数据
+    # ======================
+    price_control_sku_dict = {}
+    if price_control_sku_file is not None:
+        df_price_control = pd.read_excel(price_control_sku_file)
+        if len(df_price_control.columns) < 2:
+            st.error("❌ 控价SKU文件必须包含【系统SKU】和【控价价格】两列")
+            st.stop()
+        pc_sku_col = next((c for c in df_price_control.columns if c in ["系统SKU", "SKU", "商品SKU", "SKU编码"]), df_price_control.columns[0])
+        pc_price_col = next((c for c in df_price_control.columns if "控价" in c or "价格" in c), df_price_control.columns[1])
+        
+        df_price_control[pc_sku_col] = df_price_control[pc_sku_col].astype(str).str.strip()
+        df_price_control[pc_price_col] = pd.to_numeric(df_price_control[pc_price_col], errors='coerce')
+        df_price_control = df_price_control.dropna(subset=[pc_price_col])
+        price_control_sku_dict = df_price_control.set_index(pc_sku_col)[pc_price_col].to_dict()
+        st.warning(f"💰 已加载控价SKU数量：{len(price_control_sku_dict)} 个")
+
+    # ======================
     # 步骤1：按毛利阈值筛选
     # ======================
     df_result = df[df["毛利预估"] < profit_threshold].copy()
 
     # ======================
-    # 步骤2：排除店铺（从上传文件读取）
+    # 步骤2：排除店铺
     # ======================
     exclude_shops = []
     if exclude_shop_file is not None:
@@ -87,7 +168,7 @@ if uploaded_file is not None:
         df_result = df_result[df_result[shop_col].astype(str).str.strip().isin(exclude_shops) == False].copy()
 
     # ======================
-    # 步骤3：排除SKU（从上传文件读取）
+    # 步骤3：排除SKU
     # ======================
     exclude_skus = []
     if exclude_sku_file is not None:
@@ -97,9 +178,29 @@ if uploaded_file is not None:
         df_result = df_result[df_result[sku_col].astype(str).str.strip().isin(exclude_skus) == False].copy()
 
     # ======================
-    # 步骤4：只保留指定列 + 按店铺排序
+    # 步骤3.5：匹配控价 + 备注
     # ======================
-    output_cols = [shop_col, sku_col, "销量", "商品成本", "商品售价", "毛利预估", "目标价", "建议调价幅度"]
+    if price_control_sku_dict:
+        df_result["系统SKU_匹配"] = df_result[sku_col].astype(str).str.strip()
+        df_result["控价价格"] = df_result["系统SKU_匹配"].map(price_control_sku_dict)
+        mask = df_result["控价价格"].notna()
+        df_result.loc[mask, "目标价"] = df_result.loc[mask, "控价价格"].apply(math.ceil)
+        df_result.loc[mask, "建议调价幅度"] = (df_result.loc[mask, "目标价"] - df_result.loc[mask, "商品售价"]) / df_result.loc[mask, "商品售价"]
+        
+        df_result["备注"] = ""
+        df_result.loc[mask, "备注"] = "控价SKU"
+        
+        df_result = df_result.drop(columns=["系统SKU_匹配"])
+        matched_count = mask.sum()
+        st.success(f"🎯 匹配到控价价格的SKU数量：{matched_count} 个")
+    else:
+        df_result["备注"] = ""
+
+    # ======================
+    # 步骤4：列整理 + 排序
+    # ======================
+    output_cols = [shop_col, sku_col, "销量", "商品成本", "商品售价", "毛利预估", 
+                   "控价价格", "目标价", "建议调价幅度", "备注"]
     df_result = df_result[output_cols].rename(columns={shop_col: "店铺", sku_col: "系统SKU"})
     df_result = df_result.sort_values(by="店铺", ascending=True).reset_index(drop=True)
 
@@ -113,12 +214,14 @@ if uploaded_file is not None:
     col3.metric("已排除店铺数", len(exclude_shops))
     col4.metric("平均毛利", f"{df_result['毛利预估'].mean()*100:.2f}%")
 
-    # 格式化显示
     df_show = df_result.copy()
     df_show["毛利预估"] = df_show["毛利预估"].apply(lambda x: f"{x*100:.2f}%")
     df_show["建议调价幅度"] = df_show["建议调价幅度"].apply(lambda x: f"{x*100:.2f}%")
     df_show["商品成本"] = df_show["商品成本"].round(2)
     df_show["商品售价"] = df_show["商品售价"].round(2)
+    df_show["控价价格"] = pd.to_numeric(df_show["控价价格"], errors='coerce').round(2)
+    df_show["控价价格"] = df_show["控价价格"].fillna("-")
+    df_show["目标价"] = df_show["目标价"].round(0).astype(int)
 
     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
@@ -131,13 +234,16 @@ if uploaded_file is not None:
         wb = writer.book
         ws = wb.active
 
-        # 样式定义
         header_fill = PatternFill("solid", fgColor="1F4E79")
         header_font = Font(color="FFFFFF", bold=True, size=11)
         center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        thin_border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+        thin_border = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin")
+        )
 
-        # 表头样式
         for col in range(1, ws.max_column + 1):
             cell = ws.cell(row=1, column=col)
             cell.font = header_font
@@ -145,22 +251,20 @@ if uploaded_file is not None:
             cell.alignment = center_align
             cell.border = thin_border
 
-        # 数据格式
         for row in range(2, ws.max_row + 1):
             for col in range(1, ws.max_column + 1):
                 cell = ws.cell(row=row, column=col)
                 cell.border = thin_border
                 cell.alignment = center_align
-                if col == 6:  # 毛利预估
+                if col == 6:
                     cell.number_format = "0.00%"
-                elif col == 8:  # 建议调价幅度
+                elif col == 9:
                     cell.number_format = "0.00%"
-                elif col in [4,5]:  # 成本、售价
+                elif col in [4,5,7]:
                     cell.number_format = "0.00"
-                elif col in [3,7]:  # 销量、目标价
+                elif col in [3,8]:
                     cell.number_format = "0"
 
-        # 自动列宽
         for col in ws.columns:
             max_len = max(len(str(cell.value)) for cell in col if cell.value is not None)
             ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 22)
