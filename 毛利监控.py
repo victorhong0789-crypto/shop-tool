@@ -3,9 +3,10 @@ import pandas as pd
 import math
 from io import BytesIO
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+import numpy as np
 
 # ======================
-# 苹果风全局样式（只加这段）
+# 苹果风全局样式
 # ======================
 st.markdown("""
 <style>
@@ -126,12 +127,35 @@ if uploaded_file is not None:
         st.stop()
 
     # ======================
-    # 核心计算
+    # 核心计算（修复溢出错误）
     # ======================
+    # 计算成本和售价，同时处理异常值
     df["商品成本"] = -df["商品采购成本"] / df["销量"]
     df["商品售价"] = (df["商品优惠后金额（仅普通单）"] + df["其他优惠"]) / df["销量"]
+    
+    # 异常值处理：过滤掉成本/售价为0、NaN、inf的行
+    df = df[
+        (df["商品成本"].notna()) & (df["商品售价"].notna()) &
+        (df["商品成本"] != 0) & (df["商品售价"] != 0) &
+        (np.isfinite(df["商品成本"])) & (np.isfinite(df["商品售价"]))
+    ].copy()
+    
+    if len(df) == 0:
+        st.error("❌ 过滤异常数据后无有效商品，请检查主文件数据！")
+        st.stop()
+    
+    st.warning(f"⚠️ 已过滤异常数据，剩余有效商品数：{len(df)}")
+
+    # 毛利预估
     df["毛利预估"] = (df["商品售价"] * 0.8 - 5 - df["商品成本"]) / df["商品售价"]
-    df["目标价"] = ((5 + df["商品成本"]) / 0.6).apply(math.ceil)
+    
+    # 目标价计算：改用 np.ceil，同时处理异常值
+    df["目标价"] = ((5 + df["商品成本"]) / 0.6)
+    # 先把inf、NaN替换成0，再ceil，避免报错
+    df["目标价"] = df["目标价"].replace([np.inf, -np.inf, np.nan], 0)
+    df["目标价"] = df["目标价"].apply(lambda x: math.ceil(x) if x != 0 else 0)
+    
+    # 建议调价幅度
     df["建议调价幅度"] = (df["目标价"] - df["商品售价"]) / df["商品售价"]
 
     # ======================
