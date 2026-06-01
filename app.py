@@ -227,7 +227,7 @@ def load_and_validate_data(shop_file, ad_file):
 # -------------------------- 1. 核心数据汇总表 --------------------------
 def generate_core_summary(shop_df, ad_df):
     total_skus = shop_df["商品编号"].nunique()
-    total_impression = shop_df["商品显示次数"].sum()
+    total_impression = shop_df.get("商品显示次数", shop_df.get("曝光量", 0)).sum()
     total_click = shop_df["商品点击数"].sum()
     total_order = shop_df["已确定订单"].sum()
     total_sales = shop_df["销售额（已确认订单） (PHP)"].sum()
